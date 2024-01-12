@@ -1,0 +1,26 @@
+/* Header.css */
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #333;
+    color: #fff;
+    padding: 20px;
+    height: 100px; /* New rule to make the header taller */
+}
+
+.header .logo {
+    width: 200px; /* Adjust as needed to make the logo bigger */
+    height: 80px; /* Adjust as needed to make the logo bigger */
+}
+
+.header .nav-links {
+    display: flex;
+    gap: 20px;
+}
+
+.header .nav-links a {
+    color: #fff;
+    text-decoration: none;
+}

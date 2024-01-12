@@ -1,0 +1,17 @@
+# .gitignore
+.env
+__pycache__/
+*.py[cod]
+*.log
+*.csv
+*.dat
+*.out
+*.pid
+*.gz
+venv/
+node_modules/
+*.dist-info/
+*.egg-info/
+old/
+notebooks/
+data/
