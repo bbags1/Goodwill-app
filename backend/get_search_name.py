@@ -1,7 +1,7 @@
 import json
 
 # Load the category IDs
-with open(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\category_ids.json') as f:
+with open(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\backend\category_ids.json') as f:
     category_ids = json.load(f)
 
 # Invert the category_ids dictionary

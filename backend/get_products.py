@@ -101,7 +101,7 @@ async def get_data(terms, term_type='search_term', category=None):
     url = "https://buyerapi.shopgoodwill.com/api/Search/ItemListingData"
 
     # Connect to the SQLite database
-    conn = sqlite3.connect(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\data\gw_data.db')
+    conn = sqlite3.connect(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\backend\data\gw_data.db')
     print('connected')
     c = conn.cursor()
 

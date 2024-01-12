@@ -11,7 +11,7 @@ CORS(app)
 
 @app.route('/categories', methods=['GET'])
 def get_categories():
-    conn = sqlite3.connect(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\data\gw_data.db')
+    conn = sqlite3.connect(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\backend\data\gw_data.db')
     c = conn.cursor()
     c.execute("SELECT DISTINCT search_term FROM items")
     categories = [row[0] for row in c.fetchall()]
@@ -20,7 +20,7 @@ def get_categories():
 
 @app.route('/products', methods=['GET'])
 def get_products():
-    conn = sqlite3.connect(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\data\gw_data.db')
+    conn = sqlite3.connect(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\backend\data\gw_data.db')
     c = conn.cursor()
 
     search_terms = request.args.getlist('search_term')

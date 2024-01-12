@@ -87,7 +87,7 @@ async def update_price(row):
         
 
         # Connect to the SQLite database
-        conn = sqlite3.connect(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\data\gw_data.db')
+        conn = sqlite3.connect(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\backend\data\gw_data.db')
 
         # Create a cursor object
         c = conn.cursor()
@@ -168,7 +168,7 @@ async def update_price(row):
 
 
         # Connect to the SQLite database
-        conn = sqlite3.connect(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\data\gw_data.db')
+        conn = sqlite3.connect(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\backend\data\gw_data.db')
 
         # Create a cursor object
         c = conn.cursor()
@@ -188,7 +188,7 @@ async def update_price(row):
 
 async def update_prices():
     # Connect to the SQLite database
-    conn = sqlite3.connect(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\data\gw_data.db')
+    conn = sqlite3.connect(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\backend\data\gw_data.db')
 
     # Create a cursor object
     c = conn.cursor()
