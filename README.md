@@ -1,0 +1,1 @@
+The aim of this project is to find arbitrage opportunities by searching for item listings and executing a multimodal query to the gemini vision pro LLM to extract historical sales data that the model was trained on.
