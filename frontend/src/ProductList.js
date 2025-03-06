@@ -23,7 +23,7 @@ function ProductList() {
 
    // Fetch categories when the component is mounted
    useEffect(() => {
-    fetch(`http://${process.env.REACT_APP_SERVER_IP}:5000/categories`)
+    fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/categories`)
         .then(response => response.json())
         .then(data => setCategories(data));
     }, []);
@@ -32,7 +32,7 @@ function ProductList() {
         const params = new URLSearchParams();
         searchTermFilter.forEach(term => params.append('search_term', term));
         sellerNameFilter.forEach(name => params.append('seller_name', name));
-        fetch(`http://${process.env.REACT_APP_SERVER_IP}:5000/products?${params.toString()}`)
+        fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/products?${params.toString()}`)
             .then(response => response.json())
             .then(data => {
                 data.sort((a, b) => b.price_difference - a.price_difference);  // Sort the data

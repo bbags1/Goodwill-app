@@ -2,6 +2,7 @@ import asyncio
 import sqlite3
 import google.generativeai as genai
 import google.ai.generativelanguage as glm
+from google.geneai.types import Tool, GenerateContentConfig, GoogleSearch
 import re
 from datetime import datetime
 import pytz
@@ -13,14 +14,21 @@ api_key = os.getenv("API_KEY")
 
 genai.configure(api_key=api_key)
 
+# Database path - update this to your actual path
+DB_PATH = r'/Users/brodybagnall/Documents/goodwill/Goodwill-app/backend/data/gw_data.db'
+
 pacific = pytz.timezone('US/Pacific')
 pacific_time = datetime.now(pacific)
 pacific_time_str = pacific_time.strftime('%Y-%m-%dT%H:%M:%S')
 
 
-async def update_price(row):
+async def update_price(row, loop=None):
     try:
-        model = genai.GenerativeModel('gemini-pro-vision')
+        # Use the provided loop or get the current one
+        current_loop = loop or asyncio.get_event_loop()
+        
+        model = genai.GenerativeModel('gemini-2.0-flash-lite')
+        # Use the current loop for the API call
         response = await model.generate_content_async(
             glm.Content(
                 parts = [
@@ -87,7 +95,7 @@ async def update_price(row):
         
 
         # Connect to the SQLite database
-        conn = sqlite3.connect(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\backend\data\gw_data.db')
+        conn = sqlite3.connect(DB_PATH)
 
         # Create a cursor object
         c = conn.cursor()
@@ -106,7 +114,7 @@ async def update_price(row):
         conn.close()
 
     except:
-        model = genai.GenerativeModel('gemini-pro')
+        model = genai.GenerativeModel('gemini-2.0-flash-lite')
         response = await model.generate_content_async(
             glm.Content(
                 parts = [
@@ -168,7 +176,7 @@ async def update_price(row):
 
 
         # Connect to the SQLite database
-        conn = sqlite3.connect(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\backend\data\gw_data.db')
+        conn = sqlite3.connect(DB_PATH)
 
         # Create a cursor object
         c = conn.cursor()
@@ -186,36 +194,46 @@ async def update_price(row):
         # Close the connection
         conn.close()
 
-async def update_prices():
-    # Connect to the SQLite database
-    conn = sqlite3.connect(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\backend\data\gw_data.db')
+async def update_prices(loop=None):
+    try:
+        # Use the provided loop or get the current one
+        current_loop = loop or asyncio.get_event_loop()
+        
+        # Connect to the SQLite database
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
 
-    # Create a cursor object
-    c = conn.cursor()
+        c.execute(f'''
+        SELECT id, product_name, image_url
+        FROM items
+        WHERE ebay_price IS NULL
+        AND auction_end_time > ?
+        LIMIT 30
+        ''', [pacific_time_str])
 
-    
+        # Fetch all rows from the result of the SELECT statement
+        rows = c.fetchall()
+        
+        # Close the connection
+        conn.close()
 
-    c.execute(f'''
-    SELECT id, product_name, image_url
-    FROM items
-    WHERE ebay_price IS NULL
-    AND auction_end_time > ?
-    LIMIT 50
-    ''', [pacific_time_str])
+        # If rows is empty, return early
+        if not rows:
+            print("No rows returned from the query. Stopping function.")
+            return
 
+        # Create tasks for each row
+        tasks = []
+        for row in rows:
+            task = asyncio.create_task(update_price(row, loop=current_loop))
+            tasks.append(task)
 
-    # Fetch all rows from the result of the SELECT statement
-    rows = c.fetchall()
-    # If rows is empty, return from the function
-    if not rows:
-        print("No rows returned from the query. Stopping function.")
-        return
-
-    # Close the connection
-    conn.close()
-
-    tasks = [update_price(row) for row in rows]
-    await asyncio.gather(*tasks)
+        # Wait for all tasks to complete
+        await asyncio.gather(*tasks, return_exceptions=True)
+        
+    except Exception as e:
+        print(f"Error in update_prices: {str(e)}")
+        raise  # Re-raise the exception to be caught by the caller
 
 # Run the function once every minute for the next hour
 async def run_update_prices():

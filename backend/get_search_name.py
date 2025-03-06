@@ -1,7 +1,11 @@
 import json
+import os
+
+# Get the current directory
+current_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Load the category IDs
-with open(r'C:\Users\brody\OneDrive\Documents\Copilot\Goodwill\backend\category_ids.json') as f:
+with open(os.path.join(current_dir, 'category_ids.json')) as f:
     category_ids = json.load(f)
 
 # Invert the category_ids dictionary

@@ -22,7 +22,7 @@ function Search() {
 
     const handleSearch = () => {
         // Call the backend
-        fetch('http://localhost:5000/get_products', { // Update with your backend URL
+        fetch('http://localhost:5001/get_products', { // Update with your backend URL
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

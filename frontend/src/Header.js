@@ -8,8 +8,10 @@ function Header() {
         <header className="header">
             <img src={logo} alt="Logo" className="logo" />
             <nav className="nav-links">
-                <Link to="/ProductList">Product List</Link>
+                <Link to="/ProductGrid">Grid View</Link>
+                <Link to="/ProductList">List View</Link>
                 <Link to="/Search">Search</Link>
+                <Link to="/Settings">Settings</Link>
             </nav>
         </header>
     );
