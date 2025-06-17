@@ -150,3 +150,18 @@ The scheduler will run based on the frequency set in the Settings page (default:
 - **Frontend**: React, CSS Grid
 - **Notifications**: Email (SMTP), SMS (Twilio)
 - **Scheduling**: Python Schedule
+
+## GitHub Actions Deployment
+
+This project uses GitHub Actions for automatic deployment to Cloudflare Workers. The workflow is located at `.github/workflows/deploy.yml`.
+
+### Setup Steps
+1. Ensure your `wrangler.toml` is configured with the correct KV namespace binding and ID.
+2. Create a Cloudflare API Token with permissions to edit Workers and KV.
+3. Add the API token to your GitHub repository secrets as `CLOUDFLARE_API_TOKEN`.
+4. On push to the `main` branch, the workflow will:
+    - Install dependencies
+    - (Optionally) run migration/upload scripts
+    - Deploy your Worker using Wrangler
+
+See the workflow file for details and customization.
