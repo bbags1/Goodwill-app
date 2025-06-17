@@ -3,8 +3,6 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import Login from './Login';
 import Welcome from './Welcome';
 import ProductList from './ProductList';
-import ProductGrid from './ProductGrid'; // Import the ProductGrid component
-import Search from './Search'; // Import your Search component
 import Settings from './Settings'; // Import the Settings component
 import Header from './Header'; // Import your Header component
 import './App.css';
@@ -31,10 +29,8 @@ function App() {
                     <Header />
                     <Routes>
                         <Route path="/ProductList" element={<ProductList />} />
-                        <Route path="/ProductGrid" element={<ProductGrid />} />
-                        <Route path="/Search" element={<Search />} />
                         <Route path="/Settings" element={<Settings />} />
-                        <Route path="*" element={<Navigate to="/ProductGrid" />} />
+                        <Route path="*" element={<Navigate to="/ProductList" />} />
                     </Routes>
                 </div>
             ) : (

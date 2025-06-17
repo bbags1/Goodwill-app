@@ -3,15 +3,12 @@ import Select from 'react-select';
 import './Settings.css';
 
 function Settings() {
-    const [locations, setLocations] = useState([]);
-    const [selectedLocation, setSelectedLocation] = useState({ value: '198', label: 'WA, Spokane' });
     const [marginThreshold, setMarginThreshold] = useState(50);
     const [notificationEmail, setNotificationEmail] = useState('');
     const [notificationPhone, setNotificationPhone] = useState('');
     const [notificationType, setNotificationType] = useState('email');
     const [updateFrequency, setUpdateFrequency] = useState('daily');
-    const [searchTerms, setSearchTerms] = useState(['']);
-    const [sellerIds, setSellerIds] = useState(['19', '198']);
+    const [sellerIds, setSellerIds] = useState([]);
     const [cityOptions, setCityOptions] = useState([]);
     const [isSaving, setIsSaving] = useState(false);
     const [saveSuccess, setSaveSuccess] = useState(false);
@@ -20,159 +17,203 @@ function Settings() {
     const [actionMessage, setActionMessage] = useState('');
     const [actionError, setActionError] = useState('');
 
-    // Fetch locations from seller_map.json
     useEffect(() => {
+        // Fetch locations from the backend
         fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/locations`)
             .then(response => response.json())
             .then(data => {
-                const locationOptions = Object.entries(data).map(([id, name]) => ({
+                const options = Object.entries(data).map(([id, name]) => ({
                     value: id,
                     label: name
                 }));
-                setLocations(locationOptions);
-                setCityOptions(locationOptions);
+                setCityOptions(options.sort((a, b) => a.label.localeCompare(b.label)));
+            })
+            .catch(error => {
+                console.error('Error fetching locations:', error);
+                setActionError('Failed to load locations');
             });
-    }, []);
 
-    // Fetch user settings
-    useEffect(() => {
+        // Fetch current settings
         fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/settings`)
             .then(response => response.json())
             .then(data => {
-                if (data.location) {
-                    setSelectedLocation({ value: data.location, label: locations.find(loc => loc.value === data.location)?.label || 'WA, Spokane' });
+                setMarginThreshold(data.margin_threshold);
+                setNotificationEmail(data.notification_email || '');
+                setNotificationPhone(data.notification_phone || '');
+                setNotificationType(data.notification_type || 'email');
+                setUpdateFrequency(data.update_frequency || 'daily');
+                
+                // Parse seller_ids if it's a string, otherwise use as is
+                let parsedSellerIds = [];
+                try {
+                    if (typeof data.seller_ids === 'string') {
+                        parsedSellerIds = JSON.parse(data.seller_ids);
+                    } else if (Array.isArray(data.seller_ids)) {
+                        parsedSellerIds = data.seller_ids;
+                    }
+                } catch (e) {
+                    console.error('Error parsing seller IDs:', e);
                 }
-                if (data.margin_threshold) {
-                    setMarginThreshold(data.margin_threshold);
+                
+                // Default to Spokane if no seller IDs
+                if (!parsedSellerIds || parsedSellerIds.length === 0) {
+                    parsedSellerIds = ['198'];
                 }
-                if (data.notification_email) {
-                    setNotificationEmail(data.notification_email);
-                }
-                if (data.notification_phone) {
-                    setNotificationPhone(data.notification_phone);
-                }
-                if (data.notification_type) {
-                    setNotificationType(data.notification_type);
-                }
-                if (data.update_frequency) {
-                    setUpdateFrequency(data.update_frequency);
-                }
-                if (data.search_terms && Array.isArray(data.search_terms)) {
-                    setSearchTerms(data.search_terms.length > 0 ? data.search_terms : ['']);
-                }
-                if (data.seller_ids && Array.isArray(data.seller_ids)) {
-                    setSellerIds(data.seller_ids.length > 0 ? data.seller_ids : ['19', '198']);
-                }
+                
+                // Convert to objects with value/label if they're just strings
+                const formattedSellerIds = parsedSellerIds.map(id => {
+                    if (typeof id === 'object' && id.value) {
+                        return id;
+                    }
+                    return { value: id, label: '' }; // Label will be filled when cityOptions loads
+                });
+                
+                setSellerIds(formattedSellerIds);
             })
             .catch(error => {
                 console.error('Error fetching settings:', error);
+                setActionError('Failed to load settings');
+                // Set default seller ID
+                setSellerIds([{ value: '198', label: '' }]);
             });
-    }, [locations]);
+    }, []);
+
+    // Update seller labels when cityOptions change
+    useEffect(() => {
+        if (cityOptions.length > 0 && sellerIds.length > 0) {
+            const updatedSellerIds = sellerIds.map(seller => {
+                const matchingOption = cityOptions.find(option => option.value === seller.value);
+                return matchingOption || seller;
+            });
+            setSellerIds(updatedSellerIds);
+        }
+    }, [cityOptions]);
 
     const handleSaveSettings = () => {
+        if (sellerIds.length === 0) {
+            setActionError('Please select at least one location');
+            return;
+        }
+
         setIsSaving(true);
-        
-        const settings = {
-            location: selectedLocation.value,
-            margin_threshold: marginThreshold,
-            notification_email: notificationEmail,
-            notification_phone: notificationPhone,
-            notification_type: notificationType,
-            update_frequency: updateFrequency,
-            search_terms: searchTerms.filter(term => term.trim() !== ''),
-            seller_ids: sellerIds.filter(id => id.trim() !== '')
-        };
+        setSaveSuccess(false);
+        setActionError('');
+
+        // Extract just the seller IDs for saving
+        const sellerIdsToSave = sellerIds.map(seller => seller.value);
 
         fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/settings`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify(settings),
+            body: JSON.stringify({
+                seller_ids: sellerIdsToSave,
+                margin_threshold: marginThreshold,
+                notification_email: notificationEmail,
+                notification_phone: notificationPhone,
+                notification_type: notificationType,
+                update_frequency: updateFrequency,
+            }),
         })
         .then(response => response.json())
         .then(data => {
             setIsSaving(false);
             setSaveSuccess(true);
-            setTimeout(() => setSaveSuccess(false), 3000);
+            setActionMessage('Settings saved successfully!');
+            setTimeout(() => {
+                setSaveSuccess(false);
+                setActionMessage('');
+            }, 3000);
         })
         .catch(error => {
-            console.error('Error saving settings:', error);
             setIsSaving(false);
+            setActionError('Failed to save settings');
+            console.error('Error:', error);
         });
     };
 
-    const addSearchTerm = () => {
-        setSearchTerms([...searchTerms, '']);
-    };
-
-    const updateSearchTerm = (index, value) => {
-        const newSearchTerms = [...searchTerms];
-        newSearchTerms[index] = value;
-        setSearchTerms(newSearchTerms);
-    };
-
-    const removeSearchTerm = (index) => {
-        const newSearchTerms = [...searchTerms];
-        newSearchTerms.splice(index, 1);
-        setSearchTerms(newSearchTerms);
-    };
-
     const addSellerId = () => {
-        setSellerIds([...sellerIds, '']);
+        setSellerIds([...sellerIds, { value: '', label: '' }]);
     };
 
-    const updateSellerId = (index, value) => {
+    const updateSellerId = (index, selected) => {
         const newSellerIds = [...sellerIds];
-        newSellerIds[index] = value;
+        
+        if (!selected) {
+            // If the selected option was cleared, remove this seller ID
+            newSellerIds.splice(index, 1);
+        } else {
+            // Update or add the new seller ID
+            if (index >= newSellerIds.length) {
+                newSellerIds.push(selected);
+            } else {
+                newSellerIds[index] = selected;
+            }
+        }
+        
         setSellerIds(newSellerIds);
+        setActionError('');
     };
 
     const removeSellerId = (index) => {
-        const newSellerIds = [...sellerIds];
-        newSellerIds.splice(index, 1);
+        if (sellerIds.length <= 1) {
+            setActionError('You must keep at least one location');
+            return;
+        }
+        const newSellerIds = sellerIds.filter((_, i) => i !== index);
         setSellerIds(newSellerIds);
+        setActionError('');
     };
 
     const handleManualSearch = () => {
-        setIsSearching(true);
-        setActionMessage('');
-        setActionError('');
-        
-        // Filter out empty search terms
-        const filteredSearchTerms = searchTerms.filter(term => term.trim() !== '');
-        const filteredSellerIds = sellerIds.filter(id => id.trim() !== '');
-        
-        if (filteredSearchTerms.length === 0 || filteredSellerIds.length === 0) {
-            setActionError('Please enter at least one search term and location');
-            setIsSearching(false);
+        // Validate that at least one location is selected
+        if (sellerIds.length === 0) {
+            setActionError("Please select at least one location before performing a manual search.");
             return;
         }
-        
-        setActionMessage('Searching Goodwill for items... This may take a few minutes.');
-        
+
+        // Validate that all locations have valid values
+        const invalidSellerIds = sellerIds.filter(seller => !seller.value);
+        if (invalidSellerIds.length > 0) {
+            setActionError("Please select valid locations for all entries.");
+            return;
+        }
+
+        setIsSearching(true);
+        setActionMessage("Searching for items...");
+        setActionError("");
+
+        // Extract just the seller IDs from the selected locations
+        const selectedSellerIds = sellerIds.map(seller => seller.value);
+        console.log("Sending seller IDs:", selectedSellerIds);
+
+        // Send request to backend
         fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/manual-search`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
-            body: JSON.stringify({
-                search_terms: filteredSearchTerms,
-                seller_ids: filteredSellerIds
-            }),
+            body: JSON.stringify({ seller_ids: selectedSellerIds }),
         })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                setActionMessage(data.message);
-            } else {
-                setActionError(data.error || 'An error occurred during the search');
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! Status: ${response.status}`);
             }
+            return response.json();
+        })
+        .then(data => {
             setIsSearching(false);
+            if (data.error) {
+                setActionError(data.error);
+            } else {
+                setActionMessage(`Search completed successfully! Found ${data.total_items || 'multiple'} items.`);
+                setTimeout(() => setActionMessage(""), 5000);
+            }
         })
         .catch(error => {
-            setActionError('Failed to connect to the server');
             setIsSearching(false);
+            setActionError(`Error: ${error.message}`);
         });
     };
 
@@ -180,27 +221,23 @@ function Settings() {
         setIsUpdatingPrices(true);
         setActionMessage('');
         setActionError('');
-        
-        setActionMessage('Updating prices with Gemini AI... This may take a few minutes.');
-        
+
         fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/manual-price-update`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-            },
+            }
         })
         .then(response => response.json())
         .then(data => {
-            if (data.success) {
-                setActionMessage(data.message);
-            } else {
-                setActionError(data.error || 'An error occurred during price update');
-            }
             setIsUpdatingPrices(false);
+            setActionMessage('Price update completed successfully!');
+            setTimeout(() => setActionMessage(''), 3000);
         })
         .catch(error => {
-            setActionError('Failed to connect to the server');
             setIsUpdatingPrices(false);
+            setActionError('Error during price update. Please try again.');
+            setTimeout(() => setActionError(''), 3000);
         });
     };
 
@@ -209,156 +246,101 @@ function Settings() {
             <h2>Settings</h2>
             
             <div className="settings-section">
-                <h3>Location</h3>
-                <p>Select your default location for item searches:</p>
-                <Select
-                    className="location-select"
-                    value={selectedLocation}
-                    onChange={setSelectedLocation}
-                    options={locations}
-                    isSearchable={true}
-                />
-            </div>
-            
-            <div className="settings-section">
-                <h3>Search Criteria</h3>
-                <p>Enter search terms for items you're interested in:</p>
-                
-                <div className="search-terms-container">
-                    {searchTerms.map((term, index) => (
-                        <div key={index} className="search-term-input">
-                            <input
-                                type="text"
-                                value={term}
-                                onChange={(e) => updateSearchTerm(index, e.target.value)}
-                                placeholder="Enter search term"
-                            />
-                            <button 
-                                type="button" 
-                                className="remove-btn"
-                                onClick={() => removeSearchTerm(index)}
-                                disabled={searchTerms.length === 1}
-                            >
-                                &times;
-                            </button>
-                        </div>
-                    ))}
-                    <button 
-                        type="button" 
-                        className="add-btn"
-                        onClick={addSearchTerm}
-                    >
-                        + Add Search Term
-                    </button>
-                </div>
-
-                <p>Filter by Locations:</p>
+                <h3>Locations</h3>
+                <p>Select the Goodwill locations you want to monitor:</p>
                 <div className="seller-ids-container">
-                    {sellerIds.map((id, index) => (
+                    {sellerIds.map((seller, index) => (
                         <div key={index} className="seller-id-input">
                             <Select
                                 className="location-select"
-                                value={cityOptions.find(option => option.value === id) || null}
-                                onChange={(selectedOption) => updateSellerId(index, selectedOption ? selectedOption.value : '')}
                                 options={cityOptions}
+                                value={seller}
+                                onChange={(selected) => updateSellerId(index, selected)}
+                                placeholder="Select a location..."
                                 isSearchable={true}
-                                placeholder="Select a location"
+                                isClearable={true}
+                                isDisabled={!cityOptions.length}
                             />
                             <button 
-                                type="button" 
-                                className="remove-btn"
+                                className="remove-btn" 
                                 onClick={() => removeSellerId(index)}
-                                disabled={sellerIds.length === 1}
+                                disabled={sellerIds.length <= 1}
                             >
-                                &times;
+                                Remove
                             </button>
                         </div>
                     ))}
+                    {sellerIds.length === 0 && (
+                        <div className="seller-id-input">
+                            <Select
+                                className="location-select"
+                                options={cityOptions}
+                                onChange={(selected) => updateSellerId(0, selected)}
+                                placeholder="Select a location..."
+                                isSearchable={true}
+                                isClearable={true}
+                                isDisabled={!cityOptions.length}
+                            />
+                        </div>
+                    )}
                     <button 
-                        type="button" 
-                        className="add-btn"
+                        className="add-btn" 
                         onClick={addSellerId}
+                        disabled={!cityOptions.length}
                     >
-                        + Add Location
+                        Add Location
                     </button>
+                    {!cityOptions.length && (
+                        <p className="loading-message">Loading locations...</p>
+                    )}
                 </div>
             </div>
-            
+
             <div className="settings-section">
-                <h3>Manual Actions</h3>
-                <p>Manually trigger data collection and price estimation:</p>
-                <div className="manual-actions">
-                    <button 
-                        className="action-button search-button" 
-                        onClick={handleManualSearch}
-                        disabled={isSearching}
-                    >
-                        {isSearching ? 'Searching...' : 'Search Goodwill'}
-                    </button>
-                    <button 
-                        className="action-button price-button" 
-                        onClick={handleManualPriceUpdate}
-                        disabled={isUpdatingPrices}
-                    >
-                        {isUpdatingPrices ? 'Updating Prices...' : 'Update Prices with Gemini'}
-                    </button>
-                </div>
-                {actionMessage && <div className="action-success">{actionMessage}</div>}
-                {actionError && <div className="action-error">{actionError}</div>}
+                <h3>Margin Threshold</h3>
+                <p>Set the minimum profit margin for notifications:</p>
+                <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={marginThreshold}
+                    onChange={(e) => setMarginThreshold(parseInt(e.target.value))}
+                    className="margin-slider"
+                />
+                <span className="margin-value">{marginThreshold}%</span>
             </div>
-            
-            <div className="settings-section">
-                <h3>Profit Margin</h3>
-                <p>Set the minimum profit margin threshold for notifications:</p>
-                <div className="slider-container">
-                    <input
-                        type="range"
-                        min="0"
-                        max="100"
-                        value={marginThreshold}
-                        onChange={(e) => setMarginThreshold(parseInt(e.target.value))}
-                        className="margin-slider"
-                    />
-                    <span className="margin-value">{marginThreshold}%</span>
-                </div>
-            </div>
-            
+
             <div className="settings-section">
                 <h3>Notifications</h3>
-                <p>How would you like to receive notifications about interesting items?</p>
                 <div className="notification-options">
                     <label>
                         <input
                             type="radio"
-                            name="notification-type"
                             value="email"
                             checked={notificationType === 'email'}
-                            onChange={() => setNotificationType('email')}
+                            onChange={(e) => setNotificationType(e.target.value)}
                         />
                         Email
                     </label>
                     <label>
                         <input
                             type="radio"
-                            name="notification-type"
                             value="sms"
                             checked={notificationType === 'sms'}
-                            onChange={() => setNotificationType('sms')}
+                            onChange={(e) => setNotificationType(e.target.value)}
                         />
-                        Text Message
+                        SMS
                     </label>
                     <label>
                         <input
                             type="radio"
-                            name="notification-type"
                             value="both"
                             checked={notificationType === 'both'}
-                            onChange={() => setNotificationType('both')}
+                            onChange={(e) => setNotificationType(e.target.value)}
                         />
                         Both
                     </label>
                 </div>
-                
                 {(notificationType === 'email' || notificationType === 'both') && (
                     <div className="notification-input">
                         <label>Email Address:</label>
@@ -366,11 +348,10 @@ function Settings() {
                             type="email"
                             value={notificationEmail}
                             onChange={(e) => setNotificationEmail(e.target.value)}
-                            placeholder="Enter your email address"
+                            placeholder="Enter your email"
                         />
                     </div>
                 )}
-                
                 {(notificationType === 'sms' || notificationType === 'both') && (
                     <div className="notification-input">
                         <label>Phone Number:</label>
@@ -383,22 +364,21 @@ function Settings() {
                     </div>
                 )}
             </div>
-            
+
             <div className="settings-section">
                 <h3>Update Frequency</h3>
-                <p>How often should the app check for new items?</p>
                 <select
+                    className="frequency-select"
                     value={updateFrequency}
                     onChange={(e) => setUpdateFrequency(e.target.value)}
-                    className="frequency-select"
                 >
                     <option value="hourly">Hourly</option>
-                    <option value="daily">Daily</option>
                     <option value="twice_daily">Twice Daily</option>
+                    <option value="daily">Daily</option>
                     <option value="weekly">Weekly</option>
                 </select>
             </div>
-            
+
             <div className="settings-actions">
                 <button
                     className="save-button"
@@ -407,12 +387,26 @@ function Settings() {
                 >
                     {isSaving ? 'Saving...' : 'Save Settings'}
                 </button>
-                
-                {saveSuccess && (
-                    <div className="save-success">
-                        Settings saved successfully!
-                    </div>
-                )}
+                {saveSuccess && <span className="save-success">Settings saved successfully!</span>}
+            </div>
+
+            <div className="manual-actions">
+                <button
+                    className="action-button search-button"
+                    onClick={handleManualSearch}
+                    disabled={isSearching}
+                >
+                    {isSearching ? 'Searching...' : 'Manual Search'}
+                </button>
+                <button
+                    className="action-button price-button"
+                    onClick={handleManualPriceUpdate}
+                    disabled={isUpdatingPrices}
+                >
+                    {isUpdatingPrices ? 'Updating...' : 'Update Prices'}
+                </button>
+                {actionMessage && <span className="action-success">{actionMessage}</span>}
+                {actionError && <span className="action-error">{actionError}</span>}
             </div>
         </div>
     );

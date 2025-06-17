@@ -5,74 +5,22 @@ from datetime import datetime
 import pytz
 import json
 import os
+import asyncio
+from get_products import get_data
+from notifications import send_notifications
+from dotenv import load_dotenv
+from gemini import analyze_item_price, update_prices
+import schedule
+import time
+import threading
+from db import get_db_cursor, init_db, get_pending_price_updates_count, DB_PATH
+from map import get_seller_name  
+
+# Load environment variables
+load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
-
-# Database path - update this to your actual path
-DB_PATH = r'/Users/brodybagnall/Documents/goodwill/Goodwill-app/backend/data/gw_data.db'
-
-# Ensure the settings table exists
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    
-    # Create settings table if it doesn't exist
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS settings (
-        id INTEGER PRIMARY KEY,
-        location TEXT,
-        margin_threshold INTEGER,
-        notification_email TEXT,
-        notification_phone TEXT,
-        notification_type TEXT,
-        update_frequency TEXT,
-        search_terms TEXT,
-        seller_ids TEXT
-    )
-    ''')
-    
-    # Create favorites table if it doesn't exist
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS favorites (
-        id INTEGER PRIMARY KEY,
-        item_id TEXT,
-        date_added TEXT
-    )
-    ''')
-    
-    # Create promising table if it doesn't exist
-    c.execute('''
-    CREATE TABLE IF NOT EXISTS promising (
-        id INTEGER PRIMARY KEY,
-        item_id TEXT,
-        date_added TEXT
-    )
-    ''')
-    
-    # Insert default settings if not present
-    c.execute("SELECT COUNT(*) FROM settings")
-    if c.fetchone()[0] == 0:
-        c.execute('''
-        INSERT INTO settings (location, margin_threshold, notification_email, notification_phone, notification_type, update_frequency, search_terms, seller_ids)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ''', ('198', 50, '', '', 'email', 'daily', json.dumps(['microwave']), json.dumps(['19', '198'])))
-    else:
-        # Check if the search_terms and seller_ids columns exist
-        c.execute("PRAGMA table_info(settings)")
-        columns = [column[1] for column in c.fetchall()]
-        
-        # If columns don't exist, add them
-        if 'search_terms' not in columns:
-            c.execute("ALTER TABLE settings ADD COLUMN search_terms TEXT")
-            c.execute("UPDATE settings SET search_terms = ? WHERE id = 1", (json.dumps(['microwave']),))
-        
-        if 'seller_ids' not in columns:
-            c.execute("ALTER TABLE settings ADD COLUMN seller_ids TEXT")
-            c.execute("UPDATE settings SET seller_ids = ? WHERE id = 1", (json.dumps(['19', '198']),))
-    
-    conn.commit()
-    conn.close()
 
 # Initialize database on startup
 init_db()
@@ -80,15 +28,39 @@ init_db()
 @app.route('/categories', methods=['GET'])
 def get_categories():
     conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
-    c.execute("SELECT DISTINCT search_term FROM items")
-    categories = [row[0] for row in c.fetchall()]
+    c.execute("SELECT DISTINCT search_term FROM items WHERE search_term IS NOT NULL")
+    categories = [row['search_term'] for row in c.fetchall() if row['search_term']]
     conn.close()
     return jsonify(categories)
+
+@app.route('/product-categories', methods=['GET'])
+def get_product_categories():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    c.execute("SELECT DISTINCT category_name FROM items WHERE category_name IS NOT NULL AND category_name != ''")
+    
+    # Get all categories from the database
+    all_categories = [row['category_name'] for row in c.fetchall()]
+    conn.close()
+    
+    # Ensure consistency - if any Size categories are still in the database, map them to Clothing
+    # and remove duplicates
+    unique_categories = set()
+    for category in all_categories:
+        if category.startswith('Size'):
+            unique_categories.add('Clothing')
+        else:
+            unique_categories.add(category)
+    
+    return jsonify(sorted(list(unique_categories)))
 
 @app.route('/products', methods=['GET'])
 def get_products():
     conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
 
     search_terms = request.args.getlist('search_term')
@@ -98,75 +70,72 @@ def get_products():
     pacific_time = datetime.now(pacific)
     pacific_time_str = pacific_time.strftime('%Y-%m-%dT%H:%M:%S')
 
+    params = [pacific_time_str]
+    
     if search_terms and seller_ids:
-        placeholders_terms = ', '.join('?' for term in search_terms)
-        placeholders_sellers = ', '.join('?' for seller in seller_ids)
+        placeholders_terms = ', '.join('?' for _ in search_terms)
+        placeholders_sellers = ', '.join('?' for _ in seller_ids)
         query = f'''
-        SELECT id, search_term, seller_name, product_name, price, ebay_price, auction_end_time, (ebay_price - price) AS price_difference, shipping_price, bids, seller_id, image_url
+        SELECT id, search_term, seller_name, product_name, price, ebay_price, auction_end_time, 
+               (ebay_price - price) AS price_difference, shipping_price, bids, seller_id, image_url,
+               profit, margin, category_name
         FROM items 
-        WHERE ebay_price IS NOT NULL 
+        WHERE ebay_price IS NOT NULL AND ebay_price > 0
         AND auction_end_time > ?
         AND search_term IN ({placeholders_terms})
         AND seller_id IN ({placeholders_sellers})
         ORDER BY price_difference DESC
-        LIMIT 2000
         '''
-        c.execute(query, [pacific_time_str] + search_terms + seller_ids)
+        params.extend(search_terms)
+        params.extend(seller_ids)
     elif search_terms:
-        placeholders = ', '.join('?' for term in search_terms)
+        placeholders = ', '.join('?' for _ in search_terms)
         query = f'''
-        SELECT id, search_term, seller_name, product_name, price, ebay_price, auction_end_time, (ebay_price - price) AS price_difference, shipping_price, bids, seller_id, image_url
+        SELECT id, search_term, seller_name, product_name, price, ebay_price, auction_end_time, 
+               (ebay_price - price) AS price_difference, shipping_price, bids, seller_id, image_url,
+               profit, margin, category_name
         FROM items 
-        WHERE ebay_price IS NOT NULL 
+        WHERE ebay_price IS NOT NULL AND ebay_price > 0
         AND auction_end_time > ?
         AND search_term IN ({placeholders})
         ORDER BY price_difference DESC
-        LIMIT 2000
         '''
-        c.execute(query, [pacific_time_str] + search_terms)
+        params.extend(search_terms)
     elif seller_ids:
-        placeholders = ', '.join('?' for seller in seller_ids)
+        placeholders = ', '.join('?' for _ in seller_ids)
         query = f'''
-        SELECT id, search_term, seller_name, product_name, price, ebay_price, auction_end_time, (ebay_price - price) AS price_difference, shipping_price, bids, seller_id, image_url
+        SELECT id, search_term, seller_name, product_name, price, ebay_price, auction_end_time, 
+               (ebay_price - price) AS price_difference, shipping_price, bids, seller_id, image_url,
+               profit, margin, category_name
         FROM items 
-        WHERE ebay_price IS NOT NULL 
+        WHERE ebay_price IS NOT NULL AND ebay_price > 0
         AND auction_end_time > ?
         AND seller_id IN ({placeholders})
         ORDER BY price_difference DESC
-        LIMIT 2000
         '''
-        c.execute(query, [pacific_time_str] + seller_ids)
+        params.extend(seller_ids)
     else:
         query = '''
-        SELECT id, search_term, seller_name, product_name, price, ebay_price, auction_end_time, (ebay_price - price) AS price_difference, shipping_price, bids, seller_id, image_url
+        SELECT id, search_term, seller_name, product_name, price, ebay_price, auction_end_time, 
+               (ebay_price - price) AS price_difference, shipping_price, bids, seller_id, image_url,
+               profit, margin, category_name
         FROM items 
-        WHERE ebay_price IS NOT NULL 
+        WHERE ebay_price IS NOT NULL AND ebay_price > 0
         AND auction_end_time > ?
         ORDER BY price_difference DESC
-        LIMIT 2000
         '''
-        c.execute(query, (pacific_time_str,))
 
+    c.execute(query, params)
+    rows = c.fetchall()
+    
     products = []
-    for row in c.fetchall():
-        product = {
-            'id': row[0],
-            'search_term': row[1],
-            'seller_name': row[2],
-            'product_name': row[3],
-            'price': row[4],
-            'ebay_price': row[5],
-            'auction_end_time': row[6],
-            'price_difference': row[7],
-            'shipping_price': row[8],
-            'bids': row[9],
-            'seller_id': row[10]
-        }
+    for row in rows:
+        product = dict(row)
         
-        # Convert binary image data to base64 string
-        if row[11]:
+        # Handle base64 images
+        if product.get('image_url') and isinstance(product['image_url'], bytes):
             import base64
-            product['image_url'] = base64.b64encode(row[11]).decode('utf-8')
+            product['image_url'] = base64.b64encode(product['image_url']).decode('utf-8')
         
         products.append(product)
     
@@ -176,107 +145,124 @@ def get_products():
 @app.route('/locations', methods=['GET'])
 def get_locations():
     try:
+        # Load the seller map from JSON file
         with open('seller_map.json', 'r') as f:
             seller_map = json.load(f)
+            
+        # Return all available locations
         return jsonify(seller_map)
+        
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        print(f"Error fetching locations: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
-@app.route('/settings', methods=['GET', 'POST'])
-def handle_settings():
+@app.route('/settings', methods=['GET'])
+def get_settings():
     conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
     
-    if request.method == 'POST':
-        data = request.json
-        
-        # Convert lists to JSON strings for database storage
-        if 'search_terms' in data and isinstance(data['search_terms'], list):
-            data['search_terms'] = json.dumps(data['search_terms'])
-        
-        if 'seller_ids' in data and isinstance(data['seller_ids'], list):
-            data['seller_ids'] = json.dumps(data['seller_ids'])
+    c.execute("SELECT * FROM settings WHERE id = 1")
+    row = c.fetchone()
+    
+    if row:
+        # Convert row to dict and handle JSON fields
+        settings = dict(row)
+        if settings.get('seller_ids'):
+            try:
+                settings['seller_ids'] = json.loads(settings['seller_ids'])
+            except:
+                settings['seller_ids'] = ['19', '198']
+                
+        if settings.get('search_terms'):
+            try:
+                settings['search_terms'] = json.loads(settings['search_terms'])
+            except:
+                settings['search_terms'] = ['microwave']
+    else:
+        settings = {
+            'margin_threshold': 50,
+            'notification_email': '',
+            'notification_phone': '',
+            'notification_type': 'email',
+            'update_frequency': 'daily',
+            'seller_ids': ['19', '198'],
+            'search_terms': ['microwave']
+        }
         
         c.execute('''
-        UPDATE settings 
-        SET location = ?, 
-            margin_threshold = ?, 
-            notification_email = ?, 
-            notification_phone = ?, 
-            notification_type = ?, 
+        INSERT INTO settings (
+            id, margin_threshold, notification_email, notification_phone, 
+            notification_type, update_frequency, seller_ids, search_terms
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (1, settings['margin_threshold'], settings['notification_email'],
+              settings['notification_phone'], settings['notification_type'],
+              settings['update_frequency'], json.dumps(settings['seller_ids']),
+              json.dumps(settings['search_terms'])))
+        conn.commit()
+    
+    conn.close()
+    return jsonify(settings)
+
+@app.route('/settings', methods=['POST'])
+def update_settings():
+    try:
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({'error': 'Invalid JSON data'}), 400
+            
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        
+        # Validate seller_ids
+        seller_ids = data.get('seller_ids', ['19', '198'])
+        if not isinstance(seller_ids, list):
+            return jsonify({'error': 'Invalid seller_ids format'}), 400
+        
+        # Validate search_terms
+        search_terms = data.get('search_terms', ['microwave'])
+        if not isinstance(search_terms, list):
+            return jsonify({'error': 'Invalid search_terms format'}), 400
+        
+        c.execute('''
+        UPDATE settings SET
+            margin_threshold = ?,
+            notification_email = ?,
+            notification_phone = ?,
+            notification_type = ?,
             update_frequency = ?,
-            search_terms = ?,
-            seller_ids = ?
+            seller_ids = ?,
+            search_terms = ?
         WHERE id = 1
         ''', (
-            data.get('location', '198'),
             data.get('margin_threshold', 50),
             data.get('notification_email', ''),
             data.get('notification_phone', ''),
             data.get('notification_type', 'email'),
             data.get('update_frequency', 'daily'),
-            data.get('search_terms', json.dumps(['microwave'])),
-            data.get('seller_ids', json.dumps(['19', '198']))
+            json.dumps(seller_ids),
+            json.dumps(search_terms)
         ))
         
         conn.commit()
         conn.close()
         
-        return jsonify({"status": "success"})
-    
-    else:  # GET
-        c.execute("SELECT location, margin_threshold, notification_email, notification_phone, notification_type, update_frequency, search_terms, seller_ids FROM settings WHERE id = 1")
-        row = c.fetchone()
-        
-        settings = {}
-        if row:
-            settings = {
-                "location": row[0],
-                "margin_threshold": row[1],
-                "notification_email": row[2],
-                "notification_phone": row[3],
-                "notification_type": row[4],
-                "update_frequency": row[5]
-            }
-            
-            # Parse JSON strings for search_terms and seller_ids
-            if len(row) > 6 and row[6]:
-                try:
-                    settings["search_terms"] = json.loads(row[6])
-                except json.JSONDecodeError:
-                    settings["search_terms"] = ["microwave"]
-            else:
-                settings["search_terms"] = ["microwave"]
-                
-            if len(row) > 7 and row[7]:
-                try:
-                    settings["seller_ids"] = json.loads(row[7])
-                except json.JSONDecodeError:
-                    settings["seller_ids"] = ["19", "198"]
-            else:
-                settings["seller_ids"] = ["19", "198"]
-        else:
-            settings = {
-                "location": "198",
-                "margin_threshold": 50,
-                "notification_email": "",
-                "notification_phone": "",
-                "notification_type": "email",
-                "update_frequency": "daily",
-                "search_terms": ["microwave"],
-                "seller_ids": ["19", "198"]
-            }
-        
-        conn.close()
-        return jsonify(settings)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/favorites', methods=['GET', 'POST', 'DELETE'])
 def handle_favorites():
     conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
     c = conn.cursor()
     
     if request.method == 'POST':
-        data = request.json
+        data = request.get_json(silent=True)
+        if not data:
+            conn.close()
+            return jsonify({"status": "error", "message": "Invalid JSON data"}), 400
+            
         item_id = data.get('item_id')
         
         if not item_id:
@@ -287,10 +273,18 @@ def handle_favorites():
         pacific_time = datetime.now(pacific)
         pacific_time_str = pacific_time.strftime('%Y-%m-%dT%H:%M:%S')
         
-        c.execute("INSERT INTO favorites (item_id, date_added) VALUES (?, ?)", (item_id, pacific_time_str))
-        conn.commit()
-        conn.close()
-        return jsonify({"status": "success"})
+        # Check if item already exists
+        c.execute("SELECT COUNT(*) as count FROM favorites WHERE item_id = ?", (item_id,))
+        count = c.fetchone()['count']
+        
+        if count == 0:
+            c.execute("INSERT INTO favorites (item_id, date_added) VALUES (?, ?)", (item_id, pacific_time_str))
+            conn.commit()
+            conn.close()
+            return jsonify({"status": "success", "message": "Item added to favorites"})
+        else:
+            conn.close()
+            return jsonify({"status": "success", "message": "Item already in favorites"})
     
     elif request.method == 'DELETE':
         item_id = request.args.get('item_id')
@@ -302,106 +296,59 @@ def handle_favorites():
         c.execute("DELETE FROM favorites WHERE item_id = ?", (item_id,))
         conn.commit()
         conn.close()
-        return jsonify({"status": "success"})
+        return jsonify({"status": "success", "message": "Item removed from favorites"})
     
     else:  # GET
         c.execute("SELECT item_id FROM favorites")
-        favorites = [row[0] for row in c.fetchall()]
+        favorites = [row['item_id'] for row in c.fetchall()]
         conn.close()
         return jsonify(favorites)
 
-@app.route('/promising', methods=['GET', 'POST', 'DELETE'])
-def handle_promising():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-    
-    if request.method == 'POST':
-        data = request.json
-        item_id = data.get('item_id')
-        
-        if not item_id:
-            conn.close()
-            return jsonify({"status": "error", "message": "Item ID is required"}), 400
-        
-        pacific = pytz.timezone('US/Pacific')
-        pacific_time = datetime.now(pacific)
-        pacific_time_str = pacific_time.strftime('%Y-%m-%dT%H:%M:%S')
-        
-        c.execute("INSERT INTO promising (item_id, date_added) VALUES (?, ?)", (item_id, pacific_time_str))
-        conn.commit()
-        conn.close()
-        return jsonify({"status": "success"})
-    
-    elif request.method == 'DELETE':
-        item_id = request.args.get('item_id')
-        
-        if not item_id:
-            conn.close()
-            return jsonify({"status": "error", "message": "Item ID is required"}), 400
-        
-        c.execute("DELETE FROM promising WHERE item_id = ?", (item_id,))
-        conn.commit()
-        conn.close()
-        return jsonify({"status": "success"})
-    
-    else:  # GET
-        c.execute("SELECT item_id FROM promising")
-        promising = [row[0] for row in c.fetchall()]
-        conn.close()
-        return jsonify(promising)
-
 @app.route('/', methods=['GET'])
 def home():
-    return "Hello, this is the home page!"
+    return "Goodwill Auction Analysis Tool API - Status: Running"
 
 @app.route('/manual-search', methods=['POST'])
 def manual_search():
     try:
-        data = request.json
-        search_terms = data.get('search_terms', [])
-        seller_ids = data.get('seller_ids', [])  # These are already seller IDs, not location names
+        data = request.get_json(silent=True)
+        if not data:
+            return jsonify({"error": "Invalid JSON data"}), 400
+            
+        seller_ids = data.get('seller_ids', [])
+        search_term = data.get('search_term', '')
         
-        if not search_terms or not seller_ids:
-            return jsonify({"error": "Search terms and seller IDs are required"}), 400
+        if not seller_ids:
+            return jsonify({"error": "No seller IDs provided"}), 400
+            
+        print(f"Starting manual search for sellers: {seller_ids} with search term '{search_term}'")
         
-        # No need to convert location names to seller IDs since we're already receiving seller IDs
-        # Just validate that the seller IDs exist in our seller_map
-        try:
-            with open('seller_map.json', 'r') as f:
-                seller_map = json.load(f)
+        # Run the search asynchronously
+        asyncio.run(get_data(seller_ids, search_term))
+        
+        # Count total items in database
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute("SELECT COUNT(*) as count FROM items")
+        total_items = c.fetchone()['count']
+        
+        # Count items for the specific search
+        if search_term:
+            c.execute("SELECT COUNT(*) as count FROM items WHERE search_term = ?", (search_term,))
+            search_items = c.fetchone()['count']
+        else:
+            search_items = total_items
             
-            # Filter out any invalid seller IDs
-            valid_seller_ids = [sid for sid in seller_ids if sid in seller_map]
-            
-            if not valid_seller_ids:
-                return jsonify({"error": "No valid seller IDs found"}), 400
-                
-            # Import the necessary modules
-            import asyncio
-            from get_products import get_data
-            
-            # Log the search request
-            print(f"Manual search initiated for terms: {search_terms} on seller IDs: {valid_seller_ids}")
-            
-            # Create a new event loop for this request
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            
-            try:
-                # Run the search with the valid seller IDs as targets, passing the loop
-                loop.run_until_complete(get_data(search_terms, target_seller_ids=valid_seller_ids, loop=loop))
-            finally:
-                # Always close the loop
-                loop.close()
-            
-            return jsonify({
-                "success": True, 
-                "message": f"Search completed for terms: {search_terms} on sellers: {valid_seller_ids}"
-            })
-        except Exception as e:
-            print(f"Error in manual search: {str(e)}")
-            return jsonify({"error": f"Error processing seller IDs: {str(e)}"}), 500
-            
+        conn.close()
+        
+        return jsonify({
+            "success": True,
+            "message": "Manual search completed successfully",
+            "total_items": total_items,
+            "search_items": search_items
+        })
+        
     except Exception as e:
         print(f"Error in manual search: {str(e)}")
         return jsonify({"error": str(e)}), 500
@@ -409,41 +356,199 @@ def manual_search():
 @app.route('/manual-price-update', methods=['POST'])
 def manual_price_update():
     try:
-        print("Manual price update initiated")
+        # Get request data, defaulting to empty dict if None
+        data = request.get_json(silent=True) or {}
         
-        # Import the necessary modules
-        import asyncio
-        from gemini import update_prices
-        
-        # Create a new event loop
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
+        # Parse and validate parameters with better defaults
         try:
-            # Run the update_prices function with the loop
-            loop.run_until_complete(update_prices(loop=loop))
-            return jsonify({"success": True, "message": "Price update completed successfully"})
-        except Exception as e:
-            print(f"Error in manual price update: {str(e)}")
-            return jsonify({"error": str(e)}), 500
-        finally:
-            # Clean up the loop
-            try:
-                # Cancel all running tasks
-                pending = asyncio.all_tasks(loop)
-                for task in pending:
-                    task.cancel()
-                # Run the event loop one last time to clean up
-                if pending:
-                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-                # Close the loop
-                loop.close()
-            except Exception as e:
-                print(f"Error cleaning up loop: {str(e)}")
+            batch_size = int(data.get('batch_size', 50))  # Reduced from 50 to 10
+            test_mode = bool(data.get('test_mode', False))
+            max_concurrent = int(data.get('max_concurrent', 3))  # Reduced from 5 to 3
+        except (ValueError, TypeError) as e:
+            return jsonify({
+                'error': 'Invalid parameters',
+                'message': str(e)
+            }), 400
+        
+        # Run the async price analysis
+        asyncio.run(update_prices(
+            batch_size=batch_size,
+            test_mode=test_mode,
+            max_concurrent=max_concurrent
+        ))
+        
+        # Get statistics
+        remaining_updates = get_pending_price_updates_count()
+        
+        return jsonify({
+            'success': True,
+            'remaining_updates': remaining_updates,
+            'message': 'Price update process completed successfully'
+        })
+        
     except Exception as e:
-        print(f"Error in manual price update: {str(e)}")
-        return jsonify({"error": str(e)}), 500
+        print(f"Error during price update: {str(e)}")
+        return jsonify({
+            'error': str(e),
+            'message': 'Error during price update process'
+        }), 500
+
+@app.route('/items', methods=['GET'])
+def get_items():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    # Get query parameters
+    min_margin = request.args.get('min_margin', type=float, default=0)
+    max_items = request.args.get('max_items', type=int, default=100)
+    seller_ids_str = request.args.get('seller_ids', type=str, default=None)
+    
+    # Convert seller_ids string to list if provided
+    seller_ids = None
+    if seller_ids_str:
+        try:
+            seller_ids = json.loads(seller_ids_str)
+        except:
+            return jsonify({"error": "Invalid seller_ids format"}), 400
+    
+    # Get current date in Pacific timezone for comparison
+    pacific = pytz.timezone('US/Pacific')
+    pacific_time = datetime.now(pacific)
+    pacific_time_str = pacific_time.strftime('%Y-%m-%dT%H:%M:%S')
+    
+    # Build the query
+    params = [min_margin, pacific_time_str]
+    
+    query = '''
+    SELECT * FROM items 
+    WHERE ebay_price IS NOT NULL AND ebay_price > 0
+    AND margin >= ?
+    AND auction_end_time > ?
+    '''
+    
+    if seller_ids:
+        placeholders = ','.join('?' * len(seller_ids))
+        query += f' AND seller_id IN ({placeholders})'
+        params.extend(seller_ids)
+    
+    query += ' ORDER BY margin DESC LIMIT ?'
+    params.append(max_items)
+    
+    # Execute the query
+    c.execute(query, params)
+    
+    # Process rows to handle image data properly
+    items = []
+    for row in c.fetchall():
+        item = dict(row)
+        
+        # Handle image_url - could be a string URL or binary data
+        if 'image_url' in item and item['image_url'] and isinstance(item['image_url'], bytes):
+            import base64
+            item['image_url'] = base64.b64encode(item['image_url']).decode('utf-8')
+        
+        items.append(item)
+    
+    conn.close()
+    return jsonify(items)
+
+def run_scheduled_tasks():
+    while True:
+        schedule.run_pending()
+        time.sleep(60)
+
+def scheduled_search():
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        
+        # Get seller_ids from settings
+        c.execute("SELECT seller_ids, search_terms FROM settings WHERE id = 1")
+        row = c.fetchone()
+        conn.close()
+        
+        seller_ids = []
+        search_terms = []
+        
+        if row:
+            if row['seller_ids']:
+                try:
+                    seller_ids = json.loads(row['seller_ids'])
+                except:
+                    seller_ids = ['19', '198']
+                    
+            if row['search_terms']:
+                try:
+                    search_terms = json.loads(row['search_terms'])
+                except:
+                    search_terms = ['microwave']
+        
+        # If no seller IDs, use default
+        if not seller_ids:
+            seller_ids = ['19', '198']
+            
+        # If no search terms, use empty string to get all items
+        if not search_terms:
+            # Run a single search with empty term
+            asyncio.run(get_data(seller_ids, ''))
+        else:
+            # Run a search for each term
+            for term in search_terms:
+                asyncio.run(get_data(seller_ids, term))
+        
+        print(f"Scheduled search completed at {datetime.now()}")
+    except Exception as e:
+        print(f"Error in scheduled search: {str(e)}")
+
+def scheduled_price_update():
+    try:
+        # Update prices with smaller batches and fewer concurrent requests
+        asyncio.run(update_prices(batch_size=10, test_mode=False, max_concurrent=3))
+        print(f"Scheduled price update completed at {datetime.now()}")
+    except Exception as e:
+        print(f"Error in scheduled price update: {str(e)}")
+
+def setup_schedules():
+    """Set up scheduled tasks based on user settings."""
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    c = conn.cursor()
+    
+    # Get update frequency from settings
+    c.execute("SELECT update_frequency FROM settings WHERE id = 1")
+    row = c.fetchone()
+    conn.close()
+    
+    # Default to daily if no settings found
+    frequency = row['update_frequency'] if row else 'daily'
+    
+    # Schedule tasks based on frequency
+    if frequency == 'hourly':
+        schedule.every().hour.do(scheduled_search)
+        schedule.every().hour.at(":30").do(scheduled_price_update)
+    elif frequency == 'twice_daily':
+        schedule.every().day.at("08:00").do(scheduled_search)
+        schedule.every().day.at("20:00").do(scheduled_search)
+        schedule.every().day.at("08:30").do(scheduled_price_update)
+        schedule.every().day.at("20:30").do(scheduled_price_update)
+    elif frequency == 'weekly':
+        schedule.every().monday.at("08:00").do(scheduled_search)
+        schedule.every().monday.at("08:30").do(scheduled_price_update)
+    else:  # Default to daily
+        schedule.every().day.at("08:00").do(scheduled_search)
+        schedule.every().day.at("08:30").do(scheduled_price_update)
+    
+    print(f"Scheduled tasks set up with {frequency} frequency")
 
 if __name__ == '__main__':
-    init_db()
-    app.run(host = '0.0.0.0', port=5001, debug=True)
+    # Setup the scheduler
+    setup_schedules()
+    
+    # Start the scheduler in a separate thread
+    scheduler_thread = threading.Thread(target=run_scheduled_tasks, daemon=True)
+    scheduler_thread.start()
+    
+    # Start the Flask app
+    app.run(host='0.0.0.0', port=5001)
