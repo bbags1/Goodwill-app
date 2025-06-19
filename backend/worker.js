@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { serveStatic } from 'hono/cloudflare-workers'
+// import { serveStatic } from 'hono/cloudflare-workers' // Removed, not needed
 import { cors } from 'hono/cors'
 
 const app = new Hono()
