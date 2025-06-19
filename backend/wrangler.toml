@@ -17,3 +17,6 @@ custom_domain = true
 # SSL/TLS configuration
 [triggers]
 crons = ["0 0 * * *"]  # Daily cron job for data updates 
+
+[site]
+bucket = "./public" 

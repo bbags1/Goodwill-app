@@ -1,0 +1,16 @@
+{
+  "files": {
+    "main.css": "/static/css/main.48f5bd84.css",
+    "main.js": "/static/js/main.381bd2b7.js",
+    "static/js/787.71fdd8ff.chunk.js": "/static/js/787.71fdd8ff.chunk.js",
+    "static/media/kiras-logo.jpg": "/static/media/kiras-logo.fdf9dd5365897e755611.jpg",
+    "index.html": "/index.html",
+    "main.48f5bd84.css.map": "/static/css/main.48f5bd84.css.map",
+    "main.381bd2b7.js.map": "/static/js/main.381bd2b7.js.map",
+    "787.71fdd8ff.chunk.js.map": "/static/js/787.71fdd8ff.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.48f5bd84.css",
+    "static/js/main.381bd2b7.js"
+  ]
+}

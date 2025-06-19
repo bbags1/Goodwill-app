@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-// import { serveStatic } from 'hono/cloudflare-workers' // Removed, not needed
+import { serveStatic } from 'hono/cloudflare-workers'
 import { cors } from 'hono/cors'
 
 const app = new Hono()
@@ -14,35 +14,44 @@ app.use('/*', cors({
   credentials: true,
 }))
 
+// Serve static assets
+app.use('/static/*', serveStatic({ root: './' }))
+app.use('/favicon.ico', serveStatic({ root: './' }))
+app.use('/logo192.png', serveStatic({ root: './' }))
+app.use('/logo512.png', serveStatic({ root: './' }))
+app.use('/manifest.json', serveStatic({ root: './' }))
+app.use('/robots.txt', serveStatic({ root: './' }))
+app.use('/', serveStatic({ root: './', rewriteRequestPath: (path) => '/index.html' }))
+
 // Health check endpoint
-app.get('/', (c) => c.text('Goodwill App API is running'))
+app.get('/api', (c) => c.text('Goodwill App API is running'))
 
 // Items endpoint
-app.get('/items', async (c) => {
+app.get('/api/items', async (c) => {
   const items = await c.env.GOODWILL_KV.get('items')
   return c.json(JSON.parse(items || '[]'))
 })
 
 // Settings endpoint
-app.get('/settings', async (c) => {
+app.get('/api/settings', async (c) => {
   const settings = await c.env.GOODWILL_KV.get('settings')
   return c.json(JSON.parse(settings || '[]'))
 })
 
 // Favorites endpoint
-app.get('/favorites', async (c) => {
+app.get('/api/favorites', async (c) => {
   const favorites = await c.env.GOODWILL_KV.get('favorites')
   return c.json(JSON.parse(favorites || '[]'))
 })
 
 // Promising items endpoint
-app.get('/promising', async (c) => {
+app.get('/api/promising', async (c) => {
   const promising = await c.env.GOODWILL_KV.get('promising')
   return c.json(JSON.parse(promising || '[]'))
 })
 
 // Search endpoint
-app.get('/search', async (c) => {
+app.get('/api/search', async (c) => {
   const query = c.req.query('q')
   if (!query) {
     return c.json({ error: 'Query parameter required' }, 400)
@@ -52,14 +61,14 @@ app.get('/search', async (c) => {
 })
 
 // Update settings endpoint
-app.post('/settings', async (c) => {
+app.post('/api/settings', async (c) => {
   const settings = await c.req.json()
   await c.env.GOODWILL_KV.put('settings', JSON.stringify(settings))
   return c.json({ success: true })
 })
 
 // Add to favorites endpoint
-app.post('/favorites', async (c) => {
+app.post('/api/favorites', async (c) => {
   const favorite = await c.req.json()
   const favorites = JSON.parse(await c.env.GOODWILL_KV.get('favorites') || '[]')
   favorites.push(favorite)
@@ -68,7 +77,7 @@ app.post('/favorites', async (c) => {
 })
 
 // Add to promising endpoint
-app.post('/promising', async (c) => {
+app.post('/api/promising', async (c) => {
   const promising = await c.req.json()
   const promisingItems = JSON.parse(await c.env.GOODWILL_KV.get('promising') || '[]')
   promisingItems.push(promising)
