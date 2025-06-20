@@ -277,7 +277,7 @@ function ProductList() {
                         onClick={() => openGoodwillListing(product.id)}
                         onError={(e) => {
                             e.target.onerror = null;
-                            e.target.src = 'https://via.placeholder.com/200x200?text=No+Image';
+                            e.target.src = 'https://placehold.co/200x200/cccccc/666666?text=No+Image';
                         }}
                     />
                 );
@@ -290,7 +290,7 @@ function ProductList() {
                         onClick={() => openGoodwillListing(product.id)}
                         onError={(e) => {
                             e.target.onerror = null;
-                            e.target.src = 'https://via.placeholder.com/200x200?text=No+Image';
+                            e.target.src = 'https://placehold.co/200x200/cccccc/666666?text=No+Image';
                         }}
                     />
                 );
