@@ -10,8 +10,8 @@ function uploadToKV(key, data) {
         // Write data to temporary file
         fs.writeFileSync(tempFile, JSON.stringify(data));
         
-        // Upload using the temporary file
-        execSync(`wrangler kv:key put --binding=GOODWILL_KV "${key}" --preview=false < ${tempFile}`);
+        // Upload using the temporary file with the CORRECTED command
+        execSync(`wrangler kv key put "${key}" --binding=GOODWILL_KV --preview=false < ${tempFile}`);
         console.log(`Successfully uploaded ${key}`);
     } catch (error) {
         console.error(`Error uploading ${key}:`, error);

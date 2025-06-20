@@ -61,13 +61,13 @@ function ProductList() {
    useEffect(() => {
         setIsLoading(true);
         // Fetch search terms (used for search term filter)
-        fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/categories`)
+        fetch(`/api/categories`)
             .then(response => response.json())
             .then(data => setCategories(data))
             .catch(error => console.error('Error fetching categories:', error));
         
         // Fetch product categories for the category filter
-        fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/product-categories`)
+        fetch(`/api/product-categories`)
             .then(response => response.json())
             .then(data => {
                 // Store the results directly in categoryOptions state to ensure they're available
@@ -78,7 +78,7 @@ function ProductList() {
             .catch(error => console.error('Error fetching product categories:', error));
         
         // Fetch locations
-        fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/locations`)
+        fetch(`/api/locations`)
             .then(response => response.json())
             .then(data => {
                 const locationOptions = Object.entries(data).map(([id, name]) => ({
@@ -103,7 +103,7 @@ function ProductList() {
 
     // Fetch favorites from the backend API
     const fetchFavorites = () => {
-        fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/favorites`)
+        fetch(`/api/favorites`)
             .then(response => response.json())
             .then(data => {
                 setFavorites(data);
@@ -122,7 +122,7 @@ function ProductList() {
         const params = new URLSearchParams();
         searchTermFilter.forEach(term => params.append('search_term', term));
         sellerNameFilter.forEach(name => params.append('seller_name', name));
-        fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/products?${params.toString()}`)
+        fetch(`/api/products?${params.toString()}`)
             .then(response => response.json())
             .then(data => {
                 data.sort((a, b) => b.price_difference - a.price_difference);  // Sort the data
@@ -183,7 +183,7 @@ function ProductList() {
     const toggleFavorite = (productId) => {
         if (favorites.includes(productId)) {
             // Remove from favorites
-            fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/favorites?item_id=${productId}`, {
+            fetch(`/api/favorites?item_id=${productId}`, {
                 method: 'DELETE',
             })
                 .then(response => response.json())
@@ -195,7 +195,7 @@ function ProductList() {
                 .catch(error => console.error('Error removing favorite:', error));
         } else {
             // Add to favorites
-            fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/favorites`, {
+            fetch(`/api/favorites`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

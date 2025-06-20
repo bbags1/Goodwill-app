@@ -32,6 +32,38 @@ app.get('/api/items', async (c) => {
   return c.json(JSON.parse(items || '[]'))
 })
 
+// Products endpoint (alias for items for frontend compatibility)
+app.get('/api/products', async (c) => {
+  const items = await c.env.GOODWILL_KV.get('items')
+  return c.json(JSON.parse(items || '[]'))
+})
+
+// Categories endpoint
+app.get('/api/categories', async (c) => {
+  const items = await c.env.GOODWILL_KV.get('items')
+  const itemsData = JSON.parse(items || '[]')
+  const categories = [...new Set(itemsData.map(item => item.search_term).filter(Boolean))]
+  return c.json(categories)
+})
+
+// Product categories endpoint
+app.get('/api/product-categories', async (c) => {
+  const items = await c.env.GOODWILL_KV.get('items')
+  const itemsData = JSON.parse(items || '[]')
+  const categories = [...new Set(itemsData.map(item => item.category_name).filter(Boolean))]
+  return c.json(categories)
+})
+
+// Locations endpoint
+app.get('/api/locations', async (c) => {
+  // Return a basic seller map - you may want to store this in KV as well
+  const locations = {
+    "19": "Portland, OR",
+    "198": "Spokane, WA"
+  }
+  return c.json(locations)
+})
+
 // Settings endpoint
 app.get('/api/settings', async (c) => {
   const settings = await c.env.GOODWILL_KV.get('settings')
@@ -71,9 +103,21 @@ app.post('/api/settings', async (c) => {
 app.post('/api/favorites', async (c) => {
   const favorite = await c.req.json()
   const favorites = JSON.parse(await c.env.GOODWILL_KV.get('favorites') || '[]')
-  favorites.push(favorite)
+  favorites.push(favorite.item_id)
   await c.env.GOODWILL_KV.put('favorites', JSON.stringify(favorites))
-  return c.json({ success: true })
+  return c.json({ status: 'success', message: 'Item added to favorites' })
+})
+
+// Remove from favorites endpoint
+app.delete('/api/favorites', async (c) => {
+  const itemId = c.req.query('item_id')
+  if (!itemId) {
+    return c.json({ error: 'Item ID is required' }, 400)
+  }
+  const favorites = JSON.parse(await c.env.GOODWILL_KV.get('favorites') || '[]')
+  const updatedFavorites = favorites.filter(id => id !== itemId)
+  await c.env.GOODWILL_KV.put('favorites', JSON.stringify(updatedFavorites))
+  return c.json({ status: 'success', message: 'Item removed from favorites' })
 })
 
 // Add to promising endpoint
@@ -83,6 +127,20 @@ app.post('/api/promising', async (c) => {
   promisingItems.push(promising)
   await c.env.GOODWILL_KV.put('promising', JSON.stringify(promisingItems))
   return c.json({ success: true })
+})
+
+// Manual search endpoint (placeholder - Workers can't run Python scripts)
+app.post('/api/manual-search', async (c) => {
+  return c.json({ 
+    error: 'Manual search is not available in the Worker deployment. Use the scheduled updates instead.' 
+  }, 501)
+})
+
+// Manual price update endpoint (placeholder - Workers can't run Python scripts)
+app.post('/api/manual-price-update', async (c) => {
+  return c.json({ 
+    error: 'Manual price update is not available in the Worker deployment. Use the scheduled updates instead.' 
+  }, 501)
 })
 
 export default {

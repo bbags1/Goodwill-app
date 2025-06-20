@@ -19,7 +19,7 @@ function Settings() {
 
     useEffect(() => {
         // Fetch locations from the backend
-        fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/locations`)
+        fetch(`/api/locations`)
             .then(response => response.json())
             .then(data => {
                 const options = Object.entries(data).map(([id, name]) => ({
@@ -34,7 +34,7 @@ function Settings() {
             });
 
         // Fetch current settings
-        fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/settings`)
+        fetch(`/api/settings`)
             .then(response => response.json())
             .then(data => {
                 setMarginThreshold(data.margin_threshold);
@@ -102,7 +102,7 @@ function Settings() {
         // Extract just the seller IDs for saving
         const sellerIdsToSave = sellerIds.map(seller => seller.value);
 
-        fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/settings`, {
+        fetch(`/api/settings`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -189,7 +189,7 @@ function Settings() {
         console.log("Sending seller IDs:", selectedSellerIds);
 
         // Send request to backend
-        fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/manual-search`, {
+        fetch(`/api/manual-search`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -222,7 +222,7 @@ function Settings() {
         setActionMessage('');
         setActionError('');
 
-        fetch(`http://${process.env.REACT_APP_SERVER_IP}:5001/manual-price-update`, {
+        fetch(`/api/manual-price-update`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
